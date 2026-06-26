@@ -1,52 +1,84 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:neopoker/core/constants/app_colors.dart';
 import 'package:neopoker/core/constants/app_typography.dart';
 import 'package:neopoker/core/router/app_router.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  DateTime? _lastBackPress;
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.darkBackground,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const Spacer(flex: 2),
-              Text(
-                'NEOPOKER',
-                style: AppTypography.headingLarge.copyWith(
-                  color: AppColors.neonCyan,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final now = DateTime.now();
+        if (_lastBackPress != null &&
+            now.difference(_lastBackPress!) < const Duration(seconds: 2)) {
+          _lastBackPress = null;
+          SystemNavigator.pop();
+          return;
+        }
+        _lastBackPress = now;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Presiona atrás de nuevo para salir'),
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: AppColors.cardBackground,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.darkBackground,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                const Spacer(flex: 2),
+                Text(
+                  'NEOPOKER',
+                  style: AppTypography.headingLarge.copyWith(
+                    color: AppColors.neonCyan,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'El juego de cartas del futuro',
-                style: AppTypography.bodySmall.copyWith(
-                  color: AppColors.textSecondary,
+                const SizedBox(height: 8),
+                Text(
+                  'El juego de cartas del futuro',
+                  style: AppTypography.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
                 ),
-              ),
-              const Spacer(),
-              _MenuButton(
-                label: 'JUGAR',
-                onTap: () => context.go(AppRouter.lobby),
-              ),
-              const SizedBox(height: 16),
-              _MenuButton(
-                label: 'PERFIL',
-                onTap: () => context.go(AppRouter.profile),
-              ),
-              const SizedBox(height: 16),
-              _MenuButton(
-                label: 'AJUSTES',
-                onTap: () => context.go(AppRouter.settings),
-              ),
-              const Spacer(flex: 3),
-            ],
+                const Spacer(),
+                _MenuButton(
+                  label: 'JUGAR',
+                  onTap: () => context.go(AppRouter.lobby),
+                ),
+                const SizedBox(height: 16),
+                _MenuButton(
+                  label: 'PERFIL',
+                  onTap: () => context.go(AppRouter.profile),
+                ),
+                const SizedBox(height: 16),
+                _MenuButton(
+                  label: 'AJUSTES',
+                  onTap: () => context.go(AppRouter.settings),
+                ),
+                const Spacer(flex: 3),
+              ],
+            ),
           ),
         ),
       ),

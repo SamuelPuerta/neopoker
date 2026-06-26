@@ -18,6 +18,7 @@ dependencies:
   get_it: ^7.6.7
   json_annotation: ^4.8.1
   uuid: ^4.3.3
+  audioplayers: ^6.8.0
 
 dev_dependencies:
   flutter_test:

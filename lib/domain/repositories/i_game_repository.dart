@@ -26,6 +26,8 @@ abstract interface class IGameRepository {
 
   Future<ShowdownResult> resolveShowdown(String sessionId);
 
+  Future<void> startNewHand(String sessionId);
+
   Stream<GameState> watchGameState(String sessionId);
 
   Future<void> endSession(String sessionId);

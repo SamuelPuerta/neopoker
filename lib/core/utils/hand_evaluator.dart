@@ -9,9 +9,23 @@ class HandEvaluator {
   HandResult evaluate(List<CardEntity> holeCards, List<CardEntity> communityCards) {
     final allCards = [...holeCards, ...communityCards];
     final combinations = _getCombinations(allCards, 5);
+    if (combinations.isEmpty) {
+      final sorted = List<CardEntity>.from(allCards)
+        ..sort((a, b) => b.numericValue.compareTo(a.numericValue));
+      final values = sorted.map((c) => c.numericValue).toList();
+      return HandResult(
+        rank: HandRank.highCard,
+        bestHand: sorted,
+        tiebreakers: _isPair(values) ? values : values,
+      );
+    }
     return combinations
         .map(_evaluateFiveCards)
         .reduce((best, current) => current.compareTo(best) > 0 ? current : best);
+  }
+
+  bool _isPair(List<int> values) {
+    return values.toSet().length < values.length;
   }
 
   List<List<CardEntity>> _getCombinations(List<CardEntity> cards, int k) {
@@ -183,6 +197,11 @@ class HandEvaluator {
     List<CardEntity> communityCards,
     int opponents,
   ) {
+    if (holeCards.length < 2) return 0.0;
+    if (communityCards.length < 3) {
+      return _preFlopProbability(holeCards, opponents);
+    }
+
     final ownResult = evaluate(holeCards, communityCards);
     final deck = _buildDeckWithout(holeCards, communityCards);
     final unknownCount = communityCards.length;
@@ -196,6 +215,32 @@ class HandEvaluator {
         cardsToDraw, deck);
   }
 
+  double _preFlopProbability(List<CardEntity> holeCards, int opponents) {
+    if (holeCards.length < 2) return 0.0;
+    final r1 = holeCards[0].numericValue;
+    final r2 = holeCards[1].numericValue;
+    final paired = r1 == r2;
+    final suited = holeCards[0].suit == holeCards[1].suit;
+    final highCard = max(r1, r2);
+
+    double prob = 0.2;
+    if (paired) {
+      if (highCard >= 12) prob = 0.55;
+      else if (highCard >= 10) prob = 0.45;
+      else prob = 0.35;
+    } else if (suited && highCard >= 12) {
+      prob = 0.40;
+    } else if (suited && highCard >= 10) {
+      prob = 0.32;
+    } else if (highCard >= 12) {
+      prob = 0.30;
+    } else if (highCard >= 10) {
+      prob = 0.25;
+    }
+
+    return prob / (opponents + 1);
+  }
+
   double _monteCarloSimulation(
     List<CardEntity> holeCards,
     List<CardEntity> communityCards,
@@ -203,7 +248,7 @@ class HandEvaluator {
     int cardsToDraw,
     List<CardEntity> deck,
   ) {
-    const int simulations = 5000;
+    const int simulations = 500;
     int wins = 0;
     final rng = Random();
 

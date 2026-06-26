@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:neopoker/core/utils/sound_service.dart';
 import 'package:neopoker/domain/entities/game_state.dart';
 import 'package:neopoker/domain/enums/game_phase.dart';
 import 'package:neopoker/domain/enums/player_action.dart';
@@ -20,6 +21,8 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
 
   String? _sessionId;
   StreamSubscription? _gameSubscription;
+  GameState? _lastState;
+  bool _awaitingShowdown = false;
 
   GameBloc({
     required IGameRepository gameRepository,
@@ -62,9 +65,6 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
         playerIds: allIds,
       );
 
-      await _gameRepository.dealCards(_sessionId!);
-      await _gameRepository.postBlinds(_sessionId!);
-
       _gameSubscription?.cancel();
       _gameSubscription = _gameRepository
           .watchGameState(_sessionId!)
@@ -74,11 +74,8 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
         }
       });
 
-      final currentState = await _getCurrentState();
-      if (currentState != null) {
-        emit(states.GameInProgress(gameState: currentState));
-        _triggerBotActionsIfNeeded(currentState);
-      }
+      await _gameRepository.dealCards(_sessionId!);
+      await _gameRepository.postBlinds(_sessionId!);
     } catch (e) {
       emit(states.GameError(message: 'Error al iniciar partida: $e'));
     }
@@ -91,25 +88,13 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
     if (_sessionId == null) return;
 
     try {
-      final newState = await _processAction.call(
+      await _processAction.call(
         sessionId: _sessionId!,
         playerId: 'human_1',
         action: event.action,
         raiseAmount: event.raiseAmount,
       );
-
-      if (newState.phase == GamePhase.showdown ||
-          newState.phase == GamePhase.gameOver) {
-        final result = await _gameRepository.resolveShowdown(_sessionId!);
-        emit(states.GameShowdown(
-          gameState: newState,
-          results: result.results,
-          winnerId: result.winnerId,
-        ));
-      } else {
-        emit(states.GameInProgress(gameState: newState));
-        _triggerBotActionsIfNeeded(newState);
-      }
+      SoundService.instance.play(_soundForAction(event.action));
     } catch (e) {
       emit(states.GameError(message: 'Error al procesar acción: $e'));
     }
@@ -119,10 +104,8 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
     events.PowerUsed event,
     Emitter<states.GameBlocState> emit,
   ) async {
-    if (_sessionId == null) return;
-
-    final currentState = await _getCurrentState();
-    if (currentState == null) return;
+    final currentState = _lastState;
+    if (currentState == null || _sessionId == null) return;
 
     try {
       _applyPower.call(
@@ -130,11 +113,6 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
         playerId: 'human_1',
         powerType: event.powerType,
       );
-
-      final updatedState = await _getCurrentState();
-      if (updatedState != null && state is states.GameInProgress) {
-        emit(states.GameInProgress(gameState: updatedState));
-      }
     } catch (e) {
       emit(states.GameError(message: 'Error al usar poder: $e'));
     }
@@ -144,29 +122,21 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
     events.BotActionRequested event,
     Emitter<states.GameBlocState> emit,
   ) async {
-    final currentState = await _getCurrentState();
-    if (currentState == null) return;
+    final currentState = _lastState;
+    if (currentState == null || _sessionId == null) return;
+    if (!currentState.currentPlayer.isBot) return;
 
-    if (currentState.currentPlayer.isBot) {
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    try {
       final action = _getBotAction(currentState);
-      final newState = await _processAction.call(
+      await _processAction.call(
         sessionId: _sessionId!,
         playerId: currentState.currentPlayer.id,
         action: action,
       );
-
-      if (newState.phase == GamePhase.showdown ||
-          newState.phase == GamePhase.gameOver) {
-        final result = await _gameRepository.resolveShowdown(_sessionId!);
-        emit(states.GameShowdown(
-          gameState: newState,
-          results: result.results,
-          winnerId: result.winnerId,
-        ));
-      } else {
-        emit(states.GameInProgress(gameState: newState));
-        _triggerBotActionsIfNeeded(newState);
-      }
+      SoundService.instance.play(_soundForAction(action));
+    } catch (_) {
     }
   }
 
@@ -175,8 +145,42 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
     Emitter<states.GameBlocState> emit,
   ) {
     final gameState = event.gameState as GameState;
-    if (state is states.GameInProgress) {
-      emit(states.GameInProgress(gameState: gameState));
+    _lastState = gameState;
+
+    if (gameState.phase == GamePhase.showdown ||
+        gameState.phase == GamePhase.gameOver) {
+      if (!_awaitingShowdown) {
+        _resolveAndShowShowdown(gameState, emit);
+      }
+      return;
+    }
+
+    emit(states.GameInProgress(gameState: gameState));
+    _triggerBotActionsIfNeeded(gameState);
+  }
+
+  Future<void> _resolveAndShowShowdown(
+    GameState gameState,
+    Emitter<states.GameBlocState> emit,
+  ) async {
+    if (_sessionId == null) return;
+    _awaitingShowdown = true;
+    try {
+      final result = await _gameRepository.resolveShowdown(_sessionId!);
+      SoundService.instance.play(SoundType.winner);
+      emit(states.GameShowdown(
+        gameState: gameState,
+        results: result.results,
+        winnerId: result.winnerId,
+      ));
+      await Future.delayed(const Duration(seconds: 4));
+      if (!isClosed && _sessionId != null) {
+        await _gameRepository.startNewHand(_sessionId!);
+      }
+    } catch (e) {
+      emit(states.GameError(message: 'Error en showdown: $e'));
+    } finally {
+      _awaitingShowdown = false;
     }
   }
 
@@ -188,7 +192,19 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
     if (_sessionId != null) {
       await _gameRepository.endSession(_sessionId!);
     }
+    _lastState = null;
+    _awaitingShowdown = false;
     emit(const states.GameInitial());
+  }
+
+  static SoundType _soundForAction(PlayerAction action) {
+    switch (action) {
+      case PlayerAction.check: return SoundType.check;
+      case PlayerAction.call: return SoundType.call;
+      case PlayerAction.fold: return SoundType.fold;
+      case PlayerAction.raise: return SoundType.raise;
+      case PlayerAction.allIn: return SoundType.allIn;
+    }
   }
 
   void _triggerBotActionsIfNeeded(GameState gameState) {
@@ -249,11 +265,6 @@ class GameBloc extends Bloc<events.GameBlocEvent, states.GameBlocState> {
     }
 
     return PlayerAction.check;
-  }
-
-  Future<GameState?> _getCurrentState() async {
-    if (_sessionId == null) return null;
-    return _gameRepository.watchGameState(_sessionId!).first;
   }
 
   @override

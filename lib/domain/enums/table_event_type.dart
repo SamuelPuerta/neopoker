@@ -1,0 +1,17 @@
+enum TableEventType {
+  glitchCasino,
+  neonFlicker,
+  liveTransmission,
+  signalInterference,
+  overclockGlobal,
+  highLatency,
+  neonCountdown,
+  chipBlackout,
+  neonPot,
+  silentTurn,
+  doubleBlinds,
+  visualSwap,
+  tableReset,
+  ghostPot,
+  darkHand,
+}
